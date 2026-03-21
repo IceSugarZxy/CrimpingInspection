@@ -28,6 +28,8 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -70,6 +72,8 @@ import com.icesugar.CrimpingInspection.ble.OnBleConnectListener;
 import com.icesugar.CrimpingInspection.ble.OnDeviceSearchListener;
 import com.icesugar.CrimpingInspection.permission.PermissionListener;
 import com.icesugar.CrimpingInspection.permission.PermissionRequest;
+import com.icesugar.CrimpingInspection.spp.BluetoothSerialManager;
+import com.icesugar.CrimpingInspection.spp.OnSerialConnectListener;
 
 /**
  * CrimpingInspection开发
@@ -111,7 +115,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public static final int BT_OPENED = 0x0D;
     public static final int BT_CLOSED = 0x0E;
 
+    // SPP模式消息
+    public static final int SPP_CONNECT_SUCCESS = 0x20;
+    public static final int SPP_CONNECT_FAILURE = 0x21;
+    public static final int SPP_DISCONNECT_SUCCESS = 0x22;
+    public static final int SPP_RECEIVE_SUCCESS = 0x23;
+    public static final int SPP_CONNECTING = 0x24;
+    public static final int SPP_DISCONNECTING = 0x25;
+
     private TextView tvCurConState;
+    private TextView tvConnectionMode;
     private TextView tvName;
     private TextView tvAddress;
     private TextView tvTotal;
@@ -125,6 +138,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private Button btAll;
     private Button btAnalysis;
     private Button btTest;
+    private RadioGroup rgBluetoothMode;
+    private RadioButton rbBleMode;
+    private RadioButton rbSppMode;
     private EditText evSteelcore;
     private LinearLayout llDeviceList;
     private ListView lvDevices;
@@ -135,6 +151,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private BluetoothDevice curBluetoothDevice;  //当前连接的设备
     //当前设备连接状态
     private boolean curConnState = false;
+
+    // SPP串口管理器
+    private BluetoothSerialManager sppManager;
+    private BluetoothDevice curSppDevice;  //当前SPP连接的设备
+    private boolean curSppConnState = false;
+    // 连接模式: true = BLE, false = SPP
+    private boolean isBleMode = true;
 
     /**
      * 绘图部分
@@ -228,6 +251,37 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
                 case BT_OPENED:
                     Log.d(TAG, "系统蓝牙已打开");
+                    break;
+
+                case SPP_CONNECTING:
+                    Log.d(TAG, "SPP正在连接...");
+                    tvCurConState.setText("串口连接中...");
+                    break;
+
+                case SPP_CONNECT_SUCCESS:
+                    Log.d(TAG, "SPP连接成功");
+                    tvCurConState.setText("SPP连接成功");
+                    tvCurConState.setTextColor(Color.BLUE);
+                    curSppConnState = true;
+                    llDeviceList.setVisibility(View.GONE);
+                    break;
+
+                case SPP_CONNECT_FAILURE:
+                    Log.d(TAG, "SPP连接失败");
+                    tvCurConState.setText("SPP连接失败");
+                    curSppConnState = false;
+                    break;
+
+                case SPP_DISCONNECT_SUCCESS:
+                    Log.d(TAG, "SPP断开成功");
+                    tvCurConState.setText("SPP断开成功");
+                    tvCurConState.setTextColor(Color.RED);
+                    curSppConnState = false;
+                    break;
+
+                case SPP_RECEIVE_SUCCESS:
+                    byte[] sppData = (byte[]) msg.obj;
+                    processReceivedData(sppData);
                     break;
             }
 
@@ -327,6 +381,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
      * 初始化视图
      */
     private void initView() {
+        rgBluetoothMode = findViewById(R.id.rg_bluetooth_mode);
+        rbBleMode = findViewById(R.id.rb_ble_mode);
+        rbSppMode = findViewById(R.id.rb_spp_mode);
+        tvConnectionMode = findViewById(R.id.tv_connection_mode);
         btSearch = findViewById(R.id.bt_search);
         tvCurConState = findViewById(R.id.tv_cur_con_state);
         btConnect = findViewById(R.id.bt_connect);
@@ -368,32 +426,45 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         setButtonTouchListener(btReset);
         setButtonTouchListener(btSave);
 
+        // 蓝牙模式切换监听
+        rgBluetoothMode.setOnCheckedChangeListener((group, checkedId) -> {
+            if (checkedId == R.id.rb_ble_mode) {
+                isBleMode = true;
+                tvConnectionMode.setText("当前: BLE");
+                Log.d(TAG, "切换到BLE模式");
+            } else if (checkedId == R.id.rb_spp_mode) {
+                isBleMode = false;
+                tvConnectionMode.setText("当前: 串口(SPP)");
+                Log.d(TAG, "切换到SPP模式");
+            }
+        });
+
         // 设置设备列表的点击监听
         lvDevices.setOnItemClickListener((adapterView, view, i, l) -> {
             BLEDevice bleDevice = (BLEDevice) lvDevicesAdapter.getItem(i);
             BluetoothDevice bluetoothDevice = bleDevice.getBluetoothDevice();
-            if (bleManager != null) {
-                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                    return;
+            if (isBleMode) {
+                // BLE模式
+                if (bleManager != null) {
+                    if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                        return;
+                    }
+                    bleManager.stopDiscoveryDevice();
                 }
-                bleManager.stopDiscoveryDevice();
+                Message message = new Message();
+                message.what = SELECT_DEVICE;
+                message.obj = bluetoothDevice;
+                mHandler.sendMessage(message);
+            } else {
+                // SPP模式
+                if (sppManager != null) {
+                    sppManager.stopDiscovery();
+                }
+                curSppDevice = bluetoothDevice;
+                tvName.setText(bluetoothDevice.getName());
+                tvAddress.setText(bluetoothDevice.getAddress());
+                llDeviceList.setVisibility(View.GONE);
             }
-            Message message = new Message();
-            message.what = SELECT_DEVICE;
-            message.obj = bluetoothDevice;
-            mHandler.sendMessage(message);
-        });
-
-        lvDevices.setOnItemClickListener((adapterView, view, i, l) -> {
-            BLEDevice bleDevice = (BLEDevice) lvDevicesAdapter.getItem(i);
-            BluetoothDevice bluetoothDevice = bleDevice.getBluetoothDevice();
-            if(bleManager != null){
-                bleManager.stopDiscoveryDevice();
-            }
-            Message message = new Message();
-            message.what = SELECT_DEVICE;
-            message.obj = bluetoothDevice;
-            mHandler.sendMessage(message);
         });
     }
 
@@ -430,6 +501,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 //去打开蓝牙
                 bleManager.openBluetooth(mContext,false);
             }
+        }
+
+        // 初始化SPP串口管理器
+        sppManager = new BluetoothSerialManager();
+        if (!sppManager.initBluetooth(mContext)) {
+            Log.d(TAG, "该设备不支持蓝牙串口");
+            Toast.makeText(mContext, "该设备不支持蓝牙串口", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -531,6 +609,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         unregisterReceiver(bleBroadcastReceiver);
         // 停止内存监控定时器
         stopMemoryMonitorTimer();
+        // 释放SPP资源
+        if (sppManager != null) {
+            sppManager.destroy();
+        }
     }
 
     @SuppressLint("NonConstantResourceId")
@@ -547,20 +629,49 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 btSearch.setText("搜索");
             }
         } else if (view.getId() == R.id.bt_connect) { // 连接蓝牙
-            if (!curConnState) {
-                if (bleManager != null) {
-                    bleManager.connectBleDevice(mContext, curBluetoothDevice, 15000, SERVICE_UUID, READ_UUID, WRITE_UUID, onBleConnectListener);
+            if (isBleMode) {
+                // BLE模式
+                if (!curConnState) {
+                    if (bleManager != null && curBluetoothDevice != null) {
+                        bleManager.connectBleDevice(mContext, curBluetoothDevice, 15000, SERVICE_UUID, READ_UUID, WRITE_UUID, onBleConnectListener);
+                    } else {
+                        Toast.makeText(this, "请先选择BLE设备", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    Toast.makeText(this, "当前BLE设备已连接", Toast.LENGTH_SHORT).show();
                 }
             } else {
-                Toast.makeText(this, "当前设备已连接", Toast.LENGTH_SHORT).show();
+                // SPP模式
+                if (!curSppConnState) {
+                    if (sppManager != null && curSppDevice != null) {
+                        sppManager.setOnSerialConnectListener(onSerialConnectListener);
+                        sppManager.connect(curSppDevice);
+                    } else {
+                        Toast.makeText(this, "请先选择串口设备", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    Toast.makeText(this, "当前串口设备已连接", Toast.LENGTH_SHORT).show();
+                }
             }
         } else if (view.getId() == R.id.bt_disconnect) { // 断开连接
-            if (curConnState) {
-                if (bleManager != null) {
-                    bleManager.disConnectDevice();
+            if (isBleMode) {
+                // BLE模式
+                if (curConnState) {
+                    if (bleManager != null) {
+                        bleManager.disConnectDevice();
+                    }
+                } else {
+                    Toast.makeText(this, "当前设备未连接", Toast.LENGTH_SHORT).show();
                 }
             } else {
-                Toast.makeText(this, "当前设备未连接", Toast.LENGTH_SHORT).show();
+                // SPP模式
+                if (curSppConnState) {
+                    if (sppManager != null) {
+                        sppManager.disconnect();
+                    }
+                } else {
+                    Toast.makeText(this, "当前设备未连接", Toast.LENGTH_SHORT).show();
+                }
             }
         } else if (view.getId() == R.id.bt_all) {
             // 对chart1进行y轴范围自适应
@@ -1503,22 +1614,49 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //////////////////////////////////  搜索设备  /////////////////////////////////////////////////
     @RequiresPermission(value = "android.permission.BLUETOOTH_SCAN")
     private void searchBtDevice() {
-        if(bleManager == null){
-            Log.d(TAG, "searchBtDevice()-->bleManager == null");
-            return;
-        }
-
-        if (bleManager.isDiscovery()) { //当前正在搜索设备...
-
-            bleManager.stopDiscoveryDevice();
-        }
-
         if(lvDevicesAdapter != null){
             lvDevicesAdapter.clear();  //清空列表
         }
 
-        //开始搜索
-        bleManager.startDiscoveryDevice(onDeviceSearchListener,15000);
+        if (isBleMode) {
+            // BLE模式
+            if(bleManager == null){
+                Log.d(TAG, "searchBtDevice()-->bleManager == null");
+                return;
+            }
+
+            if (bleManager.isDiscovery()) {
+                bleManager.stopDiscoveryDevice();
+            }
+
+            //开始搜索BLE设备
+            bleManager.startDiscoveryDevice(onDeviceSearchListener,15000);
+        } else {
+            // SPP模式
+            if(sppManager == null){
+                Log.d(TAG, "searchBtDevice()-->sppManager == null");
+                return;
+            }
+
+            // 先显示已配对的设备
+            java.util.Set<BluetoothDevice> pairedDevices = sppManager.getPairedDevices();
+            if (pairedDevices != null && !pairedDevices.isEmpty()) {
+                for (BluetoothDevice device : pairedDevices) {
+                    BLEDevice bleDevice = new BLEDevice(device, 0);
+                    lvDevicesAdapter.addDevice(bleDevice);
+                }
+            }
+
+            // 开始搜索新设备
+            sppManager.startDiscovery();
+
+            // 延迟15秒后停止搜索
+            new Handler().postDelayed(() -> {
+                if (sppManager != null) {
+                    sppManager.stopDiscovery();
+                }
+            }, 15000);
+        }
     }
 
     //扫描结果回调
@@ -1537,6 +1675,45 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             Message message = new Message();
             message.what = DISCOVERY_OUT_TIME;
             mHandler.sendMessage(message);
+        }
+    };
+
+    // SPP串口连接回调
+    private final OnSerialConnectListener onSerialConnectListener = new OnSerialConnectListener() {
+        @Override
+        public void onConnecting() {
+            mHandler.sendEmptyMessage(SPP_CONNECTING);
+        }
+
+        @Override
+        public void onConnectSuccess() {
+            mHandler.sendEmptyMessage(SPP_CONNECT_SUCCESS);
+        }
+
+        @Override
+        public void onConnectFailure(String msg) {
+            Message message = new Message();
+            message.what = SPP_CONNECT_FAILURE;
+            message.obj = msg;
+            mHandler.sendMessage(message);
+        }
+
+        @Override
+        public void onDisconnected() {
+            mHandler.sendEmptyMessage(SPP_DISCONNECT_SUCCESS);
+        }
+
+        @Override
+        public void onDataReceived(byte[] data) {
+            Message message = new Message();
+            message.what = SPP_RECEIVE_SUCCESS;
+            message.obj = data;
+            mHandler.sendMessage(message);
+        }
+
+        @Override
+        public void onError(String error) {
+            Log.e(TAG, "SPP Error: " + error);
         }
     };
 

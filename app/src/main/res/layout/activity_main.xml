@@ -18,6 +18,57 @@
         android:text="高压输电线压接质量检测上位机"
         android:layout_marginVertical="5dp"/>
 
+    <!-- 蓝牙模式切换 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="5dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="蓝牙模式:"
+            android:textSize="14sp"
+            android:textColor="@color/colorPrimary"/>
+
+        <RadioGroup
+            android:id="@+id/rg_bluetooth_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginLeft="10dp">
+
+            <RadioButton
+                android:id="@+id/rb_ble_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="BLE"
+                android:textSize="14sp"
+                android:checked="true"/>
+
+            <RadioButton
+                android:id="@+id/rb_spp_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="串口(SPP)"
+                android:textSize="14sp"
+                android:layout_marginLeft="15dp"/>
+
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tv_connection_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="20dp"
+            android:text="当前: BLE"
+            android:textSize="12sp"
+            android:textColor="#666666"/>
+
+    </LinearLayout>
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
