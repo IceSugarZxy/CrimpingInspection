@@ -9,6 +9,7 @@ import android.widget.BaseAdapter;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -16,11 +17,14 @@ import java.util.List;
  */
 public class LVDevicesAdapter extends BaseAdapter {
 
-    private Context context;
+    private static final int MAX_DEVICES = 50;  // 最多显示设备数量
+
+    private final Context context;  // 使用 final 避免意外修改
     private List<BLEDevice> list;
 
     public LVDevicesAdapter(Context context) {
-        this.context = context;
+        // 使用 ApplicationContext 避免 Activity Context 泄漏
+        this.context = context.getApplicationContext();
         list = new ArrayList<>();
     }
 
@@ -71,13 +75,21 @@ public class LVDevicesAdapter extends BaseAdapter {
     }
 
     /**
-     * 初始化所有设备列表
+     * 初始化所有设备列表 - 按 RSSI 信号强度排序，最多显示50个
      * @param bluetoothDevices
      */
-    public void addAllDevice(List<BLEDevice> bluetoothDevices){
-        if(list != null){
+    public void addAllDevice(List<BLEDevice> bluetoothDevices) {
+        if (list != null) {
             list.clear();
-            list.addAll(bluetoothDevices);
+            if (bluetoothDevices != null) {
+                // 按 RSSI 降序排序（信号强的在前）
+                Collections.sort(bluetoothDevices, (d1, d2) -> Integer.compare(d2.getRSSI(), d1.getRSSI()));
+                // 限制最多显示50个设备
+                int size = Math.min(bluetoothDevices.size(), MAX_DEVICES);
+                for (int i = 0; i < size; i++) {
+                    list.add(bluetoothDevices.get(i));
+                }
+            }
             notifyDataSetChanged();
         }
     }

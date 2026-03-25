@@ -17,15 +17,16 @@
             android:layout_height="wrap_content"
             android:padding="5dp"
             android:textColor="@color/colorPrimary"
-            android:textSize="16sp" />
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/tv_device_address"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:padding="5dp"
-            android:textColor="@color/colorPrimary"
-            android:textSize="16sp" />
+            android:textColor="@android:color/darker_gray"
+            android:textSize="12sp" />
 
     </LinearLayout>
 

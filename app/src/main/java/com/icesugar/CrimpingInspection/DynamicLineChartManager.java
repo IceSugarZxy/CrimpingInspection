@@ -183,10 +183,11 @@ public class DynamicLineChartManager {
             lineChart.setData(lineData);
         }
 
-        // 批量添加所有点
+        // 批量添加所有点（数据格式：多条曲线数据交替排列，如[曲线0_点1, 曲线1_点1, 曲线0_点2, 曲线1_点2, ...]）
         for (int i = 0; i < numbers.size(); i++) {
-            Entry entry = new Entry(lineDataSets.get(i).getEntryCount(), numbers.get(i));
-            lineData.addEntry(entry, i);
+            int dataSetIndex = i % lineDataSets.size();
+            Entry entry = new Entry(lineDataSets.get(dataSetIndex).getEntryCount(), numbers.get(i));
+            lineData.addEntry(entry, dataSetIndex);
         }
         
         // 单次UI更新

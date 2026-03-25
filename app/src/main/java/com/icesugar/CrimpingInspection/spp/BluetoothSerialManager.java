@@ -349,20 +349,21 @@ public class BluetoothSerialManager {
             while (isReading && isConnected) {
                 try {
                     if (inputStream != null && inputStream.available() > 0) {
-                        int bytesRead = inputStream.read(buffer);
-                        if (bytesRead > 0) {
-                            byte[] data = new byte[bytesRead];
-                            System.arraycopy(buffer, 0, data, 0, bytesRead);
-                            Log.w(TAG, "收到数据: " + bytesRead + " bytes");
-                            notifyDataReceived(data);
-                        }
+                        // 循环读取所有可用数据，避免丢包
+                        do {
+                            int bytesRead = inputStream.read(buffer);
+                            if (bytesRead > 0) {
+                                byte[] data = new byte[bytesRead];
+                                System.arraycopy(buffer, 0, data, 0, bytesRead);
+                                Log.w(TAG, "收到数据: " + bytesRead + " bytes");
+                                notifyDataReceived(data);
+                            }
+                        } while (inputStream.available() > 0);
                     } else {
-                        Thread.sleep(50);
+                        Thread.yield();  // 无数据时让出CPU
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "读取数据异常: " + e.getMessage());
-                    break;
-                } catch (InterruptedException e) {
                     break;
                 }
             }

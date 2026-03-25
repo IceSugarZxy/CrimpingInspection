@@ -24,6 +24,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup.LayoutParams;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -32,8 +33,12 @@ import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ScrollView;
+import android.widget.Switch;
 
 import androidx.annotation.NonNull;
+import java.lang.ref.WeakReference;
+
 import androidx.annotation.RequiresApi;
 import androidx.annotation.RequiresPermission;
 import androidx.appcompat.app.AppCompatActivity;
@@ -54,10 +59,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.github.mikephil.charting.components.AxisBase;
 import com.github.mikephil.charting.components.Description;
@@ -141,8 +147,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private RadioGroup rgBluetoothMode;
     private RadioButton rbBleMode;
     private RadioButton rbSppMode;
+    private Switch switchDataMode;
     private EditText evSteelcore;
     private LinearLayout llDeviceList;
+    private ScrollView scrollRawData;
+    private TextView tvRawData;
     private ListView lvDevices;
     private LVDevicesAdapter lvDevicesAdapter;
     private Context mContext;
@@ -162,7 +171,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     /**
      * 绘图部分
      */
+    private static final int UPDATE_THRESHOLD = 10;  // 每10个包更新一次图表
     private int total = 0;
+    private int dataCount = 0;  // 数据包计数器
     private LineChart mChart1;
     private LineChart mChart2;
     private DynamicLineChartManager dynamicLineChartManager1;
@@ -170,6 +181,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private float eddy = 0;
     private List<Float> eddy_list = new ArrayList<>();
     private List<Float> perm_list = new ArrayList<>();
+    // 累积的所有数据点（用于波形模式批量绘制）
+    private List<Float> allEddyList = new ArrayList<>();
+    private List<Float> allPermList = new ArrayList<>();
 
     private final String mStrPath = Environment.getExternalStorageDirectory().getPath();
     private String putout = "";
@@ -178,17 +192,27 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private float chart2_max = 200f;
     private float chart2_min = -300f;
     
-    // 内存监控定时器
-    private Timer memoryMonitorTimer;
-    private TimerTask memoryMonitorTask;
+    // 内存监控定时器 - 使用 ScheduledExecutorService 替代 Timer
+    private ScheduledExecutorService memoryMonitorExecutor;
+    private ScheduledFuture<?> memoryMonitorFuture;
     private Description eddyDescription, permDescription;
-    @SuppressLint("HandlerLeak")
-    private final Handler mHandler = new Handler(Looper.getMainLooper()) {
+    // Handler 使用静态内部类 + WeakReference 避免内存泄漏
+    private static class MainHandler extends Handler {
+        private final WeakReference<MainActivity> activityRef;
+
+        MainHandler(MainActivity activity) {
+            super(Looper.getMainLooper());
+            activityRef = new WeakReference<>(activity);
+        }
+
         @SuppressLint({"SetTextI18n", "DefaultLocale"})
         @Override
         @RequiresPermission(value = "android.permission.BLUETOOTH_CONNECT")
         public void handleMessage(@NonNull Message msg) {
-            super.handleMessage(msg);
+            MainActivity activity = activityRef.get();
+            if (activity == null || activity.isFinishing()) {
+                return;
+            }
 
             switch (msg.what) {
                 case START_DISCOVERY:
@@ -201,38 +225,38 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
                 case DISCOVERY_DEVICE:  //扫描到设备
                     BLEDevice bleDevice = (BLEDevice) msg.obj;
-                    lvDevicesAdapter.addDevice(bleDevice);
+                    activity.lvDevicesAdapter.addDevice(bleDevice);
 
                     break;
 
                 case SELECT_DEVICE:
                     BluetoothDevice bluetoothDevice = (BluetoothDevice) msg.obj;
-                    tvName.setText(bluetoothDevice.getName());
-                    tvAddress.setText(bluetoothDevice.getAddress());
-                    curBluetoothDevice = bluetoothDevice; // 更新当前设备
-                    llDeviceList.setVisibility(View.GONE);
+                    activity.tvName.setText(bluetoothDevice.getName());
+                    activity.tvAddress.setText(bluetoothDevice.getAddress());
+                    activity.curBluetoothDevice = bluetoothDevice; // 更新当前设备
+                    activity.llDeviceList.setVisibility(View.GONE);
 
                     break;
 
                 case CONNECT_FAILURE: //连接失败
                     Log.d(TAG, "连接失败");
-                    tvCurConState.setText("连接失败");
-                    curConnState = false;
+                    activity.tvCurConState.setText("连接失败");
+                    activity.curConnState = false;
                     break;
 
                 case CONNECT_SUCCESS:  //连接成功
                     Log.d(TAG, "连接成功");
-                    tvCurConState.setText("连接成功");
-                    tvCurConState.setTextColor(Color.BLUE);
-                    curConnState = true;
-                    llDeviceList.setVisibility(View.GONE);
+                    activity.tvCurConState.setText("连接成功");
+                    activity.tvCurConState.setTextColor(Color.BLUE);
+                    activity.curConnState = true;
+                    activity.llDeviceList.setVisibility(View.GONE);
                     break;
 
                 case DISCONNECT_SUCCESS:
                     Log.d(TAG, "断开成功");
-                    tvCurConState.setText("断开成功");
-                    tvCurConState.setTextColor(Color.RED);
-                    curConnState = false;
+                    activity.tvCurConState.setText("断开成功");
+                    activity.tvCurConState.setTextColor(Color.RED);
+                    activity.curConnState = false;
 
                     break;
 
@@ -242,7 +266,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
                 case RECEIVE_SUCCESS:  // 接收成功
                     byte[] recBufSuc = (byte[]) msg.obj;
-                    processReceivedData(recBufSuc); // 调用封装后的方法
+                    activity.processReceivedData(recBufSuc); // 调用封装后的方法
                     break;
 
                 case BT_CLOSED:
@@ -255,69 +279,95 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
                 case SPP_CONNECTING:
                     Log.d(TAG, "SPP正在连接...");
-                    tvCurConState.setText("串口连接中...");
+                    activity.tvCurConState.setText("串口连接中...");
                     break;
 
                 case SPP_CONNECT_SUCCESS:
                     Log.d(TAG, "SPP连接成功");
-                    tvCurConState.setText("SPP连接成功");
-                    tvCurConState.setTextColor(Color.BLUE);
-                    curSppConnState = true;
-                    llDeviceList.setVisibility(View.GONE);
+                    activity.tvCurConState.setText("SPP连接成功");
+                    activity.tvCurConState.setTextColor(Color.BLUE);
+                    activity.curSppConnState = true;
+                    activity.llDeviceList.setVisibility(View.GONE);
                     break;
 
                 case SPP_CONNECT_FAILURE:
                     Log.d(TAG, "SPP连接失败");
-                    tvCurConState.setText("SPP连接失败");
-                    curSppConnState = false;
+                    activity.tvCurConState.setText("SPP连接失败");
+                    activity.curSppConnState = false;
                     break;
 
                 case SPP_DISCONNECT_SUCCESS:
                     Log.d(TAG, "SPP断开成功");
-                    tvCurConState.setText("SPP断开成功");
-                    tvCurConState.setTextColor(Color.RED);
-                    curSppConnState = false;
+                    activity.tvCurConState.setText("SPP断开成功");
+                    activity.tvCurConState.setTextColor(Color.RED);
+                    activity.curSppConnState = false;
                     break;
 
                 case SPP_RECEIVE_SUCCESS:
                     byte[] sppData = (byte[]) msg.obj;
-                    processReceivedData(sppData);
+                    activity.processReceivedData(sppData);
                     break;
             }
 
         }
-    };
+    }
+
+    private final MainHandler mHandler = new MainHandler(this);
+
+    // 数据模式下的数据缓冲（避免频繁UI更新）
+    private final StringBuilder rawDataBuffer = new StringBuilder();
+    private static final int RAW_DATA_BUFFER_SIZE = 100;  // 积累100次后更新一次UI
 
     private void processReceivedData(byte[] recBufSuc) {
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        executor.execute(() -> {
-            try {
-                // 在这里处理数据并获取结果
-                DataProcessor.ProcessingResult result = DataProcessor.processData(recBufSuc);
-                // 使用 Handler 将数据传回主线程
+        if (switchDataMode.isChecked()) {
+            // 数据模式：直接显示原始数据，不做分包处理
+            String rawData = DataProcessor.processRawData(recBufSuc);
+            if (rawData != null) {
+                synchronized (rawDataBuffer) {
+                    rawDataBuffer.append(rawData);
+                    if (rawDataBuffer.length() >= RAW_DATA_BUFFER_SIZE) {
+                        String toDisplay = rawDataBuffer.toString();
+                        rawDataBuffer.setLength(0);
+                        runOnUiThread(() -> {
+                            tvRawData.append(toDisplay);
+                            scrollRawData.post(() -> scrollRawData.fullScroll(View.FOCUS_DOWN));
+                        });
+                    }
+                }
+            }
+        } else {
+            // 波形模式：分包处理后累积数据，每10个包更新一次图表
+            DataProcessor.ProcessingResult result = DataProcessor.processData(recBufSuc);
+            if (result != null) {
                 runOnUiThread(() -> {
                     try {
-                        // 在这里获取返回的变量
                         eddy = result.eddy;
                         eddy_list.add(eddy);
                         perm_list = result.Perm_list;
                         putout += result.add_putout;
-                        // 调用绘图和保存的方法
-                        Draw_chart1(eddy_list);
-                        Draw_chart2(perm_list);
-                        total += 1;
+
+                        // 累积数据
+                        allEddyList.add(eddy);
+                        allPermList.add(perm_list.get(0));
+                        allPermList.add(perm_list.get(1));
+
+                        dataCount++;
+                        total++;
                         tvTotal.setText(String.valueOf(total));
-                        
-                        // 清理列表
+
+                        // 每10个包更新一次图表
+                        if (dataCount >= UPDATE_THRESHOLD) {
+                            drawAllChartData();
+                            dataCount = 0;
+                        }
+
                         eddy_list.clear();
                     } catch (Exception e) {
-                        e.printStackTrace();  // 打印异常信息
+                        e.printStackTrace();
                     }
                 });
-            } catch (Exception e) {
-                e.printStackTrace();  // 打印异常信息
             }
-        });
+        }
     }
 
     private void Draw_chart1(List<Float> data) {
@@ -348,6 +398,46 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             dynamicLineChartManager2.setYAxis(1.2f * chart2_max, Math.min(0, 1.2f*(-100+chart2_min)));
             dynamicLineChartManager2.addEntry(data);
         });
+    }
+
+    /**
+     * 绘制所有累积的数据点（每10个包调用一次）
+     */
+    private void drawAllChartData() {
+        if (allEddyList.isEmpty()) {
+            return;
+        }
+
+        // 计算 eddy 数据的最大最小值，并更新全局范围
+        float eddyBatchMax = Float.NEGATIVE_INFINITY;
+        float eddyBatchMin = Float.POSITIVE_INFINITY;
+        for (Float v : allEddyList) {
+            if (v > eddyBatchMax) eddyBatchMax = v;
+            if (v < eddyBatchMin) eddyBatchMin = v;
+        }
+        // 只扩大范围，不缩小
+        if (eddyBatchMax > chart1_max) chart1_max = eddyBatchMax + 500000;
+        if (eddyBatchMin < chart1_min) chart1_min = Math.max(0, eddyBatchMin - 500000);
+        dynamicLineChartManager1.setYAxis(chart1_max, chart1_min);
+        dynamicLineChartManager1.addEntry(allEddyList);
+
+        // 计算 perm 数据的最大最小值（幅值和相位交替存储），并更新全局范围
+        float permBatchMax = Float.NEGATIVE_INFINITY;
+        float permBatchMin = Float.POSITIVE_INFINITY;
+        for (int i = 0; i < allPermList.size(); i++) {
+            float v = allPermList.get(i);
+            if (v > permBatchMax) permBatchMax = v;
+            if (v < permBatchMin) permBatchMin = v;
+        }
+        // 只扩大范围，不缩小
+        if (permBatchMax > chart2_max) chart2_max = (float) (permBatchMax * 1.2);
+        if (permBatchMin < chart2_min) chart2_min = (float) Math.min(0, 1.2 * (-100 + permBatchMin));
+        dynamicLineChartManager2.setYAxis(chart2_max, chart2_min);
+        dynamicLineChartManager2.addEntry(allPermList);
+
+        // 清空累积数据
+        allEddyList.clear();
+        allPermList.clear();
     }
 
     @Override
@@ -401,6 +491,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         tvResult = findViewById(R.id.tv_result);
         llDeviceList = findViewById(R.id.ll_device_list);
         lvDevices = findViewById(R.id.lv_devices);
+        switchDataMode = findViewById(R.id.switch_data_mode);
+        scrollRawData = findViewById(R.id.scroll_raw_data);
+        tvRawData = findViewById(R.id.tv_raw_data);
+        mChart1 = findViewById(R.id.dynamic_chart1);
+        mChart2 = findViewById(R.id.dynamic_chart2);
     }
 
     /**
@@ -464,6 +559,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 tvName.setText(bluetoothDevice.getName());
                 tvAddress.setText(bluetoothDevice.getAddress());
                 llDeviceList.setVisibility(View.GONE);
+            }
+        });
+
+        // 数据/波形模式切换监听
+        switchDataMode.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked) {
+                // 数据模式：显示原始数据文本，隐藏图表
+                mChart1.setVisibility(View.GONE);
+                mChart2.setVisibility(View.GONE);
+                scrollRawData.setVisibility(View.VISIBLE);
+                Log.d(TAG, "切换到数据模式");
+            } else {
+                // 波形模式：显示图表，隐藏原始数据文本
+                mChart1.setVisibility(View.VISIBLE);
+                mChart2.setVisibility(View.VISIBLE);
+                scrollRawData.setVisibility(View.GONE);
+                Log.d(TAG, "切换到波形模式");
             }
         });
     }
@@ -740,13 +852,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             dynamicLineChartManager1.setYAxis(chart1_max, chart1_min);
             dynamicLineChartManager2.setYAxis(chart2_max, chart2_min);
             total = 0;
+            dataCount = 0;
             tvTotal.setText("0");
             putout = "";
             eddy_list.clear();
             perm_list.clear();
+            allEddyList.clear();
+            allPermList.clear();
             eddyDescription.setText("测试结果");
             permDescription.setText("测试结果");
             tvResult.setText("");
+            // 清空原始数据文本
+            tvRawData.setText("");
         } else if (view.getId() == R.id.bt_save) {
             createFile(putout);
         }
@@ -1812,39 +1929,36 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     };
 
     /**
-     * 启动内存监控定时器
+     * 启动内存监控定时器 - 使用 ScheduledExecutorService 替代 Timer 避免内存泄漏
      */
     private void startMemoryMonitorTimer() {
-        if (memoryMonitorTimer != null) {
-            memoryMonitorTimer.cancel();
+        if (memoryMonitorExecutor != null) {
+            memoryMonitorExecutor.shutdownNow();
         }
-        
-        memoryMonitorTimer = new Timer();
-        memoryMonitorTask = new TimerTask() {
-            @Override
-            public void run() {
-                // 在UI线程中执行内存监控
-                runOnUiThread(() -> {
-                    monitorMemoryUsage();
-                });
-            }
-        };
-        
+
+        memoryMonitorExecutor = Executors.newSingleThreadScheduledExecutor();
+
         // 每秒执行一次内存监控
-        memoryMonitorTimer.schedule(memoryMonitorTask, 0, 1000);
+        memoryMonitorFuture = memoryMonitorExecutor.scheduleAtFixedRate(() -> {
+            runOnUiThread(() -> {
+                if (!isFinishing()) {
+                    monitorMemoryUsage();
+                }
+            });
+        }, 0, 1, TimeUnit.SECONDS);
     }
-    
+
     /**
      * 停止内存监控定时器
      */
     private void stopMemoryMonitorTimer() {
-        if (memoryMonitorTimer != null) {
-            memoryMonitorTimer.cancel();
-            memoryMonitorTimer = null;
+        if (memoryMonitorFuture != null) {
+            memoryMonitorFuture.cancel(false);
+            memoryMonitorFuture = null;
         }
-        if (memoryMonitorTask != null) {
-            memoryMonitorTask.cancel();
-            memoryMonitorTask = null;
+        if (memoryMonitorExecutor != null) {
+            memoryMonitorExecutor.shutdownNow();
+            memoryMonitorExecutor = null;
         }
     }
 
