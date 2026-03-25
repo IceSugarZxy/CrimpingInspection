@@ -45,8 +45,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="BLE"
-                android:textSize="14sp"
-                android:checked="true"/>
+                android:textSize="14sp"/>
 
             <RadioButton
                 android:id="@+id/rb_spp_mode"
@@ -54,6 +53,7 @@
                 android:layout_height="wrap_content"
                 android:text="串口(SPP)"
                 android:textSize="14sp"
+                android:checked="true"
                 android:layout_marginLeft="15dp"/>
 
         </RadioGroup>
@@ -63,7 +63,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginLeft="20dp"
-            android:text="当前: BLE"
+            android:text="当前: 串口(SPP)"
             android:textSize="12sp"
             android:textColor="#666666"/>
 
