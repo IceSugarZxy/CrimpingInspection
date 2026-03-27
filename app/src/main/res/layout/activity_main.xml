@@ -300,18 +300,14 @@
 
     </LinearLayout>
 
-    <ScrollView
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:layout_marginTop="10dp"
-        android:visibility="visible">
+        android:orientation="vertical">
 
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical">
-
-            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
@@ -365,18 +361,21 @@
             <com.github.mikephil.charting.charts.LineChart
                 android:id="@+id/dynamic_chart1"
                 android:layout_width="match_parent"
-                android:layout_height="400dp"/>
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
 
             <com.github.mikephil.charting.charts.LineChart
                 android:id="@+id/dynamic_chart2"
                 android:layout_width="match_parent"
-                android:layout_height="400dp"/>
+                android:layout_height="0dp"
+                android:layout_weight="1"/>
 
             <!-- 原始数据文本显示区域 -->
             <ScrollView
                 android:id="@+id/scroll_raw_data"
                 android:layout_width="match_parent"
-                android:layout_height="400dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:visibility="gone">
 
                 <TextView
@@ -384,14 +383,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:padding="10dp"
-                    android:textSize="12sp"
+                    android:textSize="18sp"
                     android:textColor="@color/colorPrimary"
                     android:fontFamily="monospace"
                     android:hint="此处显示原始数据" />
             </ScrollView>
 
         </LinearLayout>
-
-    </ScrollView>
 
 </LinearLayout>

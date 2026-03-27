@@ -77,11 +77,12 @@ public class DynamicLineChartManager {
         xAxis.setGranularity(1f);
         xAxis.setLabelCount(5); // 减少标签数量
         
-        //Y轴设置
-        leftAxis.setAxisMinimum(0f);
+        //Y轴设置 - 初始不设固定范围，等待数据自适应
+        leftAxis.setAxisMinimum(Float.NaN);
+        leftAxis.setAxisMaximum(Float.NaN);
         leftAxis.setLabelCount(5); // 减少标签数量
         leftAxis.setGranularity(1f);
-        
+
         //禁用右坐标
         rightAxis.setEnabled(false);
     }
@@ -102,8 +103,8 @@ public class DynamicLineChartManager {
         lineDataSet.setAxisDependency(YAxis.AxisDependency.LEFT);
         lineDataSet.setValueTextSize(10f);
         lineDataSet.setMode(LineDataSet.Mode.CUBIC_BEZIER); //圆滑曲线（默认为折线）
-        //添加一个空的 LineData
-        lineData = new LineData();
+        // 立即添加空的 LineDataSet，让图例一开始就显示
+        lineData = new LineData(lineDataSet);
         lineChart.setData(lineData);
         lineChart.invalidate();
 
@@ -138,8 +139,8 @@ public class DynamicLineChartManager {
             lineDataSets.add(lineDataSet);
 
         }
-        //添加一个空的 LineData
-        lineData = new LineData();
+        // 立即添加空的 LineDataSet 列表，让图例一开始就显示
+        lineData = new LineData(lineDataSets);
         lineChart.setData(lineData);
         lineChart.invalidate();
     }
@@ -151,11 +152,23 @@ public class DynamicLineChartManager {
     public void addEntry(float number) {
         if (lineDataSet.getEntryCount() == 0) {
             lineData.addDataSet(lineDataSet);
+            max_y = number;
+            min_y = number;
         }
 
         Entry entry = new Entry(lineDataSet.getEntryCount(), number);
         lineData.addEntry(entry, 0);
-        
+
+        // Y轴自适应
+        if (number > max_y) {
+            max_y = number;
+            leftAxis.setAxisMaximum(max_y * 1.2f);
+        }
+        if (number < min_y) {
+            min_y = number;
+            leftAxis.setAxisMinimum(min_y * 0.8f);
+        }
+
         // 合并通知操作，减少UI更新频率
         if (lineDataSet.getEntryCount() % 50 == 0) { // 每50个点更新一次UI
             lineChart.notifyDataSetChanged();
@@ -181,15 +194,31 @@ public class DynamicLineChartManager {
         if (lineDataSets.get(0).getEntryCount() == 0) {
             lineData = new LineData(lineDataSets);
             lineChart.setData(lineData);
+            // 初始化Y轴范围
+            max_y = Float.MIN_VALUE;
+            min_y = Float.MAX_VALUE;
+            leftAxis.setAxisMinimum(Float.NaN);
+            leftAxis.setAxisMaximum(Float.NaN);
         }
 
         // 批量添加所有点（数据格式：多条曲线数据交替排列，如[曲线0_点1, 曲线1_点1, 曲线0_点2, 曲线1_点2, ...]）
         for (int i = 0; i < numbers.size(); i++) {
             int dataSetIndex = i % lineDataSets.size();
-            Entry entry = new Entry(lineDataSets.get(dataSetIndex).getEntryCount(), numbers.get(i));
+            float value = numbers.get(i);
+            Entry entry = new Entry(lineDataSets.get(dataSetIndex).getEntryCount(), value);
             lineData.addEntry(entry, dataSetIndex);
+
+            // Y轴自适应：只增大不减小
+            if (value > max_y) {
+                max_y = value;
+                leftAxis.setAxisMaximum(max_y * 1.2f);  // 向上扩展20%
+            }
+            if (value < min_y) {
+                min_y = value;
+                leftAxis.setAxisMinimum(min_y * 0.8f);  // 向下扩展20%，支持负数
+            }
         }
-        
+
         // 单次UI更新
         lineChart.notifyDataSetChanged();
         lineChart.setVisibleXRangeMaximum(10);

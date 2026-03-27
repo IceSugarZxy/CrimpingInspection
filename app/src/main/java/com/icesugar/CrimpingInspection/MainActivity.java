@@ -165,8 +165,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private BluetoothSerialManager sppManager;
     private BluetoothDevice curSppDevice;  //当前SPP连接的设备
     private boolean curSppConnState = false;
-    // 连接模式: true = BLE, false = SPP
-    private boolean isBleMode = true;
+    // 连接模式: true = BLE, false = SPP (默认SPP)
+    private boolean isBleMode = false;
 
     /**
      * 绘图部分
@@ -325,6 +325,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             if (rawData != null) {
                 synchronized (rawDataBuffer) {
                     rawDataBuffer.append(rawData);
+                    total++;
+                    runOnUiThread(() -> tvTotal.setText(String.valueOf(total)));
                     if (rawDataBuffer.length() >= RAW_DATA_BUFFER_SIZE) {
                         String toDisplay = rawDataBuffer.toString();
                         rawDataBuffer.setLength(0);

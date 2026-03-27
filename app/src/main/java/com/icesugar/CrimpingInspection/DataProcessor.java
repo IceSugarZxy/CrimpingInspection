@@ -64,12 +64,11 @@ public class DataProcessor {
 
     private static ProcessingResult parseCompletePart(String completePart) {
         try {
-            // 检查字符串长度（固定19位：5 + 5 + 9）
-            if (completePart.length() != 19) {
+            // 提取各段数据（permA:5位, permB:5位, eddy:9位）
+            if (completePart.length() < 19) {
                 return null;
             }
 
-            // 提取各段数据
             String permAStr = completePart.substring(0, 5);
             String permBStr = completePart.substring(5, 10);
             String eddyStr = completePart.substring(10, 19);
